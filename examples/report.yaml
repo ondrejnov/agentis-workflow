@@ -1,0 +1,35 @@
+# Krok s artefaktem, závislostmi (`needs`) a úklidovým krokem `always`.
+# Artefakty z úspěšného kroku se vrátí v result.json (outputs.artifacts); engine je zkopíruje do artifact-staging/.
+version: 1
+workflow:
+  executor: local
+  steps:
+    - name: Collect data
+      run: |
+        mkdir -p outputs/report
+        printf 'item,value\nalpha,1\nbeta,2\n' > outputs/report/data.csv
+        printf '# Report\n\nData rows are in data.csv.\n' > outputs/report/report.md
+      outputs:
+        - type: artifact
+          name: report.md
+          path: outputs/report/report.md
+        - type: artifact
+          name: data.csv
+          path: outputs/report/data.csv
+    - name: Count rows
+      needs: ["Collect data"]
+      run: |
+        printf '%s' "$(($(wc -l < outputs/report/data.csv) - 1))" > outputs/row-count
+      outputs:
+        - type: var
+          name: ROW_COUNT
+          valueFrom: outputs/row-count
+    - name: Print summary
+      needs: ["Count rows"]
+      run: |
+        echo "rows=${ROW_COUNT:-?} status=${AGENTIS_WORKFLOW_STATUS:-unknown}"
+    - name: Always report status
+      needs: ["Print summary"]
+      always: true
+      run: |
+        echo "workflow status: ${AGENTIS_WORKFLOW_STATUS:-unknown}, failed step: ${AGENTIS_FAILED_STEP:-none}"

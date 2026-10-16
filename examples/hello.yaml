@@ -1,0 +1,20 @@
+# Nejmenší workflow: lokální executor, env z tokenu, var output a podmínka `if`.
+# Spuštění: agentis-workflow run hello --workdir /tmp/hello --var TASK_TITLE="Ahoj" --executor local
+version: 1
+workflow:
+  executor: local
+  env:
+    GREETING_NAME: "[%TASK_TITLE%]"
+  steps:
+    - name: Greet
+      run: |
+        mkdir -p outputs
+        printf 'Hello, %s\n' "${GREETING_NAME:-world}" > outputs/greeting.txt
+        printf 'ok' > outputs/status
+      outputs:
+        - type: var
+          name: GREETED
+          valueFrom: outputs/status
+    - name: Show greeting
+      if: GREETED == 'ok'
+      run: cat outputs/greeting.txt

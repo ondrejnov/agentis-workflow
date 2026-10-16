@@ -1,0 +1,20 @@
+# Paralelní kroky přes `needs` a `maxParallel`; `continueOnError` nezastaví workflow.
+version: 1
+workflow:
+  executor: local
+  maxParallel: 2
+  steps:
+    - name: Lint
+      needs: []
+      run: echo "lint ok"
+    - name: Unit tests
+      needs: []
+      run: echo "tests ok"
+    - name: Optional benchmark
+      needs: []
+      continueOnError: true
+      timeoutSeconds: 300
+      run: exit 1
+    - name: Summary
+      needs: ["Lint", "Unit tests", "Optional benchmark"]
+      run: echo "summary"
