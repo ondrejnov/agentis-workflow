@@ -49,6 +49,11 @@ explicitně je lze předat přes `pass_env`.
 
 Local executor není sandbox. Spouští příkazy z YAML přímo jako uživatel procesu.
 
+Bash se hledá v `WORKFLOW_BASH`, jinak v `PATH` (na POSIX fallback `/bin/bash`). Na Windows musí jít o Git Bash
+(Git for Windows): spouštěč WSL `C:\Windows\System32\bash.exe` se přeskočí, protože nerozumí Windows cestám
+(`cd "C:\..."` selže) a nepředává env kroku. Když není v `PATH`, engine zkusí Git Bash vedle `git.exe` a ve
+standardních instalačních adresářích (`%ProgramFiles%\Git`, `%LOCALAPPDATA%\Programs\Git`).
+
 ### `docker`
 
 Každý krok běží jako kontejner spuštěný přes `docker run --rm --privileged`; příkaz lze změnit přes env

@@ -319,3 +319,39 @@ def test_docker_runner_rejects_host_mount_outside_contract(tmp_path: Path) -> No
     workflow = _load(tmp_path, text)
     with pytest.raises(ValueError, match="mountPath must be absolute"):
         DockerContainerRunner(EngineSettings())._bind_mounts(workflow, {})
+
+
+def test_resolve_bash_on_windows_skips_wsl_launcher(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentis_workflow import local_runtime
+
+    git_root = tmp_path / "Git"
+    (git_root / "cmd").mkdir(parents=True)
+    (git_root / "bin").mkdir()
+    (git_root / "cmd" / "git.exe").write_text("")
+    (git_root / "bin" / "bash.exe").write_text("")
+    wsl_bash = str(tmp_path / "Windows" / "System32" / "bash.exe")
+    found = {"bash": wsl_bash, "git": str(git_root / "cmd" / "git.exe")}
+    monkeypatch.setattr(local_runtime, "_IS_WINDOWS", True)
+    monkeypatch.setattr(local_runtime.shutil, "which", lambda name: found.get(name))
+    monkeypatch.delenv("WORKFLOW_BASH", raising=False)
+    for env_name in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)", "LOCALAPPDATA"):
+        monkeypatch.delenv(env_name, raising=False)
+
+    assert local_runtime._resolve_bash() == str((git_root / "bin" / "bash.exe").resolve())
+
+    found["git"] = None
+    assert local_runtime._resolve_bash() is None
+
+    monkeypatch.setenv("WORKFLOW_BASH", r"D:\tools\bash.exe")
+    assert local_runtime._resolve_bash() == r"D:\tools\bash.exe"
+
+
+def test_resolve_bash_on_windows_keeps_git_bash_from_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentis_workflow import local_runtime
+
+    git_bash = r"C:\Program Files\Git\usr\bin\bash.exe"
+    monkeypatch.setattr(local_runtime, "_IS_WINDOWS", True)
+    monkeypatch.setattr(local_runtime.shutil, "which", lambda name: git_bash if name == "bash" else None)
+    monkeypatch.delenv("WORKFLOW_BASH", raising=False)
+
+    assert local_runtime._resolve_bash() == git_bash

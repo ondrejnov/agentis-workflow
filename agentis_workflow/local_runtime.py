@@ -8,7 +8,8 @@ procesu enginu bez izolace, se stejným bash wrapperem (`set -euo pipefail`,
 `cd` do workingDir kroku, jinak `"$WORKDIR"`) jako v Kubernetes.
 
 Bash je potřeba i na Windows (wrapper je bash syntaxe) — hledá se v PATH
-(`shutil.which`), takže funguje přes Git Bash nebo WSL; spawn/kill se větví
+(`shutil.which`, přepis přes `WORKFLOW_BASH`) a musí to být Git Bash — spouštěč WSL
+(`System32\\bash.exe`) se přeskočí, protože nerozumí Windows cestám; spawn/kill se větví
 podle platformy (`start_new_session`+`killpg` na POSIX, `CREATE_NEW_PROCESS_GROUP`
 +`taskkill /T` na Windows).
 """
@@ -39,10 +40,53 @@ _KILL_GRACE_SEC = 5.0
 _IS_WINDOWS = os.name == "nt"
 
 
-def _resolve_bash() -> str | None:
-    """Najde bash executable; POSIX `/bin/bash`, jinak z PATH (Git Bash/WSL). None = chybí."""
+#: Adresáře, ve kterých Windows instaluje `bash.exe` spouštěč WSL. Ten nejde použít: WSL nepřeloží
+#: Windows cesty (`cd "C:\\..."` selže) a bez `WSLENV` nepředá env kroku.
+_WSL_LAUNCHER_DIRS = frozenset({"system32", "syswow64", "sysnative", "windowsapps"})
 
-    return shutil.which("bash") or ("/bin/bash" if not _IS_WINDOWS and Path("/bin/bash").exists() else None)
+
+def _is_wsl_launcher(path: str) -> bool:
+    return Path(path).parent.name.lower() in _WSL_LAUNCHER_DIRS
+
+
+def _windows_git_bash_candidates() -> list[Path]:
+    """Možná umístění Git Bash: odvozená od `git` v PATH a standardní instalační adresáře."""
+
+    candidates: list[Path] = []
+    git = shutil.which("git")
+    if git:
+        # <root>\cmd\git.exe, <root>\bin\git.exe nebo <root>\mingw64\bin\git.exe -> <root>\bin\bash.exe
+        for root in Path(git).resolve().parents[:3]:
+            candidates.append(root / "bin" / "bash.exe")
+    for env_name in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"):
+        base = os.environ.get(env_name)
+        if base:
+            candidates.append(Path(base) / "Git" / "bin" / "bash.exe")
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        candidates.append(Path(local_app_data) / "Programs" / "Git" / "bin" / "bash.exe")
+    return candidates
+
+
+def _resolve_bash() -> str | None:
+    """Najde bash executable; None = chybí.
+
+    `WORKFLOW_BASH` má přednost. Na POSIX bash z PATH, jinak `/bin/bash`. Na Windows bash z PATH,
+    pokud to není spouštěč WSL, jinak Git Bash (Git for Windows).
+    """
+
+    override = (os.environ.get("WORKFLOW_BASH") or "").strip()
+    if override:
+        return override
+    found = shutil.which("bash")
+    if not _IS_WINDOWS:
+        return found or ("/bin/bash" if Path("/bin/bash").exists() else None)
+    if found and not _is_wsl_launcher(found):
+        return found
+    for candidate in _windows_git_bash_candidates():
+        if candidate.is_file():
+            return str(candidate)
+    return None
 
 
 def _spawn_kwargs() -> dict[str, object]:
@@ -104,7 +148,8 @@ class LocalProcessRunner:
             return self._spawn_failed(
                 name,
                 log_path,
-                "bash not found in PATH (on Windows, install Git Bash or WSL and add it to PATH)",
+                "bash not found (on Windows install Git for Windows or set WORKFLOW_BASH to its bash.exe; "
+                "WSL bash is not supported)",
             )
 
         wrapper = build_bash_wrapper(step.run, workdir=step.workingDir or spec.workingDir)
